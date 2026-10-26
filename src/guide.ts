@@ -13,10 +13,27 @@ export const CARD_SELECTION_GUIDE = `会話の中でユーザーが質問した�
 
 type Existing = { title: string; category: string }[];
 
+// 既存カードのタイトル一覧に使う文字数の上限。チャットに貼れて、AI が見落としにくい長さに収める
+const TITLES_BUDGET = 15000;
+
+/** 新しいカードから順に、上限に収まるだけカテゴリごとにまとめる。existing は新しい順で渡す */
+function existingTitles(existing: Existing): string {
+  const groups = new Map<string, string[]>();
+  let length = 0;
+  for (const { title, category } of existing) {
+    length += title.length + 1;
+    if (length > TITLES_BUDGET) break;
+    groups.set(category, [...(groups.get(category) ?? []), title]);
+  }
+  return [...groups]
+    .sort(([a], [b]) => a.localeCompare(b, "ja"))
+    .map(([category, titles]) => `- ${category}：${titles.join("、")}`)
+    .join("\n");
+}
+
 /** どの AI のチャットにも貼れる、カードを JSON で出力させる指示文 */
 export function importPrompt(existing: Existing): string {
-  const categories = [...new Set(existing.map((c) => c.category))];
-  const titles = existing.slice(0, 300).map((c) => c.title);
+  const categories = [...new Set(existing.map((c) => c.category))].sort((a, b) => a.localeCompare(b, "ja"));
   return `この会話で私が学んだことを、復習用のカードにしてください。
 
 ${CARD_SELECTION_GUIDE}
@@ -26,8 +43,9 @@ ${CARD_FIELDS_GUIDE}
 - source：このチャットのサービス名（例：「Claude」「ChatGPT」）
 
 既存のカテゴリ：${categories.length ? categories.join("、") : "なし"}
-既存のカードのタイトル：${titles.length ? titles.join("、") : "なし"}
-既存のカードと同じ概念は作らないでください。
+既存のカード（カテゴリ：タイトル）：
+${existing.length ? existingTitles(existing) : "なし"}
+既存のカードと同じ概念は、タイトルの言い回しが違っても作らないでください。
 
 出力は次の形の JSON 配列を、1つのコードブロックだけで返してください。説明文は不要です。diagram の改行は \\n で表してください。
 

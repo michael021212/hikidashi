@@ -539,7 +539,20 @@ textarea.code,
   border-bottom: 1px solid var(--border);
 }
 
-.import-list li > div {
+.import-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.import-item input {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+}
+
+.import-item > div {
   display: grid;
   min-width: 0;
 }

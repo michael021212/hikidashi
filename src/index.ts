@@ -94,7 +94,13 @@ app.get("/api/stats", async (c) => c.json(await getStats(c.env.DB)));
 
 app.get("/api/titles", async (c) => c.json(await listTitles(c.env.DB)));
 
-app.get("/api/import-prompt", async (c) => c.text(importPrompt(await listTitles(c.env.DB))));
+app.get("/api/import-prompt", async (c) => {
+  const { results } = await c.env.DB.prepare("SELECT title, category FROM cards ORDER BY created_at DESC").all<{
+    title: string;
+    category: string;
+  }>();
+  return c.text(importPrompt(results));
+});
 
 app.get("/api/cards", async (c) => {
   const q = c.req.query("q")?.trim();

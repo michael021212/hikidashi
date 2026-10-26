@@ -543,6 +543,22 @@ async function copyText(text) {
   }
 }
 
+// 記号や空白、全角半角、大文字小文字の違いを無視して比べる
+function normalizeTitle(title) {
+  return title.normalize("NFKC").toLowerCase().replace(/[\s・\-_.,、。()（）［］[\]「」『』]/g, "");
+}
+
+// 一方のタイトルがもう一方に含まれる既存カードを返す。「OCSP」と「OCSPレスポンダ」など
+function similarTitle(title, titles) {
+  const a = normalizeTitle(title);
+  if (a.length < 2) return null;
+  const hit = titles.find(({ title: other }) => {
+    const b = normalizeTitle(other);
+    return b.length >= 2 && (a === b || a.includes(b) || b.includes(a));
+  });
+  return hit ? hit.title : null;
+}
+
 async function importView() {
   const [stats, titles] = await Promise.all([api("/api/stats"), api("/api/titles")]);
   const existing = new Set(titles.map((t) => t.title));
@@ -555,25 +571,53 @@ async function importView() {
   const error = h("p", { class: "error", hidden: true });
   let cards = [];
 
+  // 似たカードは保存しない状態で表示し、保存するかどうかを自分で選ぶ
   const update = () => {
     const parsed = input.value.trim() ? parseCards(input.value) : [];
     error.hidden = parsed !== null;
     error.textContent = "読み取れませんでした";
-    cards = (parsed ?? []).filter((c) => c.title && c.answer && !existing.has(String(c.title).trim()));
+    const items = (parsed ?? []).map((card) => {
+      const title = String(card.title ?? "").trim();
+      const status = !title || !card.answer ? "不完全" : existing.has(title) ? "既存" : null;
+      const similar = status ? null : similarTitle(title, titles);
+      return { card, status, similar, checked: !status && !similar };
+    });
+    const refresh = () => {
+      cards = items.filter((item) => item.checked).map((item) => item.card);
+      save.disabled = cards.length === 0 || stats.blocked;
+      save.textContent = cards.length ? `${cards.length}枚を保存` : "保存";
+    };
     swap(
       preview,
-      (parsed ?? []).map((c) => {
-        const status = !c.title || !c.answer ? "不完全" : existing.has(String(c.title).trim()) ? "既存" : null;
+      items.map((item) => {
+        const { card, status, similar } = item;
         return h(
           "li",
           { class: status ? "skipped" : "" },
-          h("div", {}, h("span", { class: "title" }, c.title || "（タイトルなし）"), h("span", { class: "meta" }, c.category || "未分類")),
+          h(
+            "label",
+            { class: "import-item" },
+            !status &&
+              h("input", {
+                type: "checkbox",
+                checked: item.checked,
+                onchange: (e) => {
+                  item.checked = e.target.checked;
+                  refresh();
+                },
+              }),
+            h(
+              "div",
+              {},
+              h("span", { class: "title" }, card.title || "（タイトルなし）"),
+              h("span", { class: "meta" }, similar ? `似ている：${similar}` : card.category || "未分類"),
+            ),
+          ),
           status && h("span", { class: "meta due" }, status),
         );
       }),
     );
-    save.disabled = cards.length === 0 || stats.blocked;
-    save.textContent = cards.length ? `${cards.length}枚を保存` : "保存";
+    refresh();
   };
   input.addEventListener("input", update);
 
