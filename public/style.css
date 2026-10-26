@@ -313,6 +313,25 @@ nav a.active {
   white-space: pre-wrap;
 }
 
+.diagram {
+  overflow-x: auto;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.diagram svg {
+  display: block;
+  max-width: none;
+  margin: 0 auto;
+}
+
+textarea.code,
+.import textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
 .pitfalls {
   padding: 12px 14px;
   border-radius: 10px;
@@ -497,11 +516,6 @@ nav a.active {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-}
-
-.import textarea {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
 }
 
 .import-list li {

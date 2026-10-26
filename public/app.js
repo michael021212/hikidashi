@@ -151,6 +151,55 @@ function chip(label, value, count) {
   );
 }
 
+// Mermaid は大きいので、図のあるカードを開いたときに初めて読み込む
+let mermaidReady = null;
+let diagramCount = 0;
+
+function loadMermaid() {
+  mermaidReady ??= import("https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs").then(({ default: mermaid }) => {
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      // 画面幅に縮めると文字が読めないので、元の大きさで描いて横にスクロールさせる
+      // 間隔と文字を小さめにして、スマホの幅に近づける
+      sequence: {
+        useMaxWidth: false,
+        width: 80,
+        actorMargin: 24,
+        boxMargin: 6,
+        noteMargin: 6,
+        messageMargin: 28,
+        actorFontSize: 13,
+        messageFontSize: 13,
+        noteFontSize: 12,
+      },
+      flowchart: { useMaxWidth: false, nodeSpacing: 24, rankSpacing: 32 },
+      themeVariables: { fontSize: "13px" },
+      theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default",
+      fontFamily: getComputedStyle(document.body).fontFamily,
+    });
+    return mermaid;
+  });
+  return mermaidReady;
+}
+
+// 描画に失敗した図は表示しない。説明文があれば内容は伝わる
+function diagram(code) {
+  const box = h("div", { class: "diagram" });
+  const id = `diagram-${++diagramCount}`;
+  loadMermaid()
+    .then((mermaid) => mermaid.render(id, code))
+    .then(({ svg }) => {
+      box.innerHTML = svg;
+    })
+    .catch(() => {
+      box.remove();
+      // 失敗すると Mermaid が作業用の要素を body に残すので消す
+      document.getElementById(`d${id}`)?.remove();
+    });
+  return box;
+}
+
 const ICONS = {
   edit: '<path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/>',
   trash: '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>',
@@ -234,6 +283,7 @@ function showAnswer(stage, card, response) {
       card.question && h("h3", { class: "title" }, card.title),
       h("p", { class: "answer" }, card.answer),
       card.explanation && h("p", { class: "explanation" }, card.explanation),
+      card.diagram && diagram(card.diagram),
       card.pitfalls && h("div", { class: "pitfalls" }, h("h4", {}, "つまずいた点"), h("p", {}, card.pitfalls)),
       card.related.length > 0 &&
         h("div", { class: "related" }, card.related.map((t) => h("span", { class: "tag" }, t))),
@@ -380,6 +430,7 @@ async function cardEditView(id, back = "#/cards") {
     field("answer", "答え", h("textarea", { rows: 3, required: true })),
     field("explanation", "説明", h("textarea", { rows: 6 })),
     field("pitfalls", "つまずいた点", h("textarea", { rows: 3 })),
+    field("diagram", "図", h("textarea", { rows: 4, class: "code" })),
     field("category", "カテゴリ", h("input", { list: "categories" })),
     field("related", "関連", h("input", { list: "titles" })),
     h("datalist", { id: "categories" }, stats.categories.map((c) => h("option", { value: c.name }))),

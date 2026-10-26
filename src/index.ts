@@ -214,6 +214,7 @@ app.get("/api/export.md", async (c) => {
     lines.push(`**答え**: ${row.answer}`, "");
     if (row.explanation) lines.push(row.explanation, "");
     if (row.pitfalls) lines.push(`**つまずいた点**: ${row.pitfalls}`, "");
+    if (row.diagram) lines.push("```mermaid", row.diagram, "```", "");
     const related = JSON.parse(row.related) as string[];
     if (related.length) lines.push(`**関連**: ${related.map((t) => `[[${t}]]`).join(" ")}`, "");
   }

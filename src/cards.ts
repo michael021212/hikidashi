@@ -28,6 +28,7 @@ export type CardRow = {
   answer: string;
   explanation: string;
   pitfalls: string;
+  diagram: string;
   category: string;
   related: string;
   source: string;
@@ -51,6 +52,7 @@ export type CardInput = {
   answer?: unknown;
   explanation?: unknown;
   pitfalls?: unknown;
+  diagram?: unknown;
   category?: unknown;
   related?: unknown;
   source?: unknown;
@@ -166,9 +168,9 @@ export async function createCards(db: D1Database, inputs: CardInput[]): Promise<
     const card = createEmptyCard(new Date(now));
     await db
       .prepare(
-        `INSERT INTO cards (id, title, question, answer, explanation, pitfalls, category, related, source,
+        `INSERT INTO cards (id, title, question, answer, explanation, pitfalls, diagram, category, related, source,
           created_at, updated_at, due, stability, difficulty, elapsed_days, scheduled_days, learning_steps, reps, lapses, state)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         id,
@@ -177,6 +179,7 @@ export async function createCards(db: D1Database, inputs: CardInput[]): Promise<
         answer,
         str(input.explanation),
         str(input.pitfalls),
+        str(input.diagram, 5000),
         str(input.category, 100) || "未分類",
         JSON.stringify(relatedList(input.related)),
         str(input.source, 500),
@@ -219,8 +222,8 @@ export async function updateCard(
   }
   await db
     .prepare(
-      `UPDATE cards SET title = ?, question = ?, answer = ?, explanation = ?, pitfalls = ?, category = ?, related = ?,
-        source = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE cards SET title = ?, question = ?, answer = ?, explanation = ?, pitfalls = ?, diagram = ?, category = ?,
+        related = ?, source = ?, updated_at = ? WHERE id = ?`,
     )
     .bind(
       title,
@@ -228,6 +231,7 @@ export async function updateCard(
       answer,
       pick("explanation") ?? row.explanation,
       pick("pitfalls") ?? row.pitfalls,
+      pick("diagram", 5000) ?? row.diagram,
       pick("category", 100) || row.category,
       input.related === undefined ? row.related : JSON.stringify(relatedList(input.related)),
       pick("source", 500) ?? row.source,

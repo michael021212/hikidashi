@@ -20,6 +20,7 @@ const cardProperties = {
   answer: { type: "string", description: "1〜2文の核心" },
   explanation: { type: "string", description: "仕組み・理由・具体例" },
   pitfalls: { type: "string", description: "ユーザーが誤解していた点、追加で質問した点。なければ空文字" },
+  diagram: { type: "string", description: "流れ・構造・比較を表す Mermaid の図。不要なら空文字" },
   category: { type: "string", description: "短い分野名" },
   related: { type: "array", items: { type: "string" }, description: "関係するカードのタイトル" },
   source: { type: "string", description: "どこで学んだか（例：Claude）" },
@@ -96,8 +97,8 @@ async function callTool(env: McpEnv, name: string, args: Record<string, any>) {
         .first<{ id: string }>();
       const card = row && (await getCard(env.DB, row.id));
       if (!card) return toolResult({ error: "not_found" }, true);
-      const { id, title, question, answer, explanation, pitfalls, category, related, source } = toJson(card);
-      return toolResult({ id, title, question, answer, explanation, pitfalls, category, related, source });
+      const { id, title, question, answer, explanation, pitfalls, diagram, category, related, source } = toJson(card);
+      return toolResult({ id, title, question, answer, explanation, pitfalls, diagram, category, related, source });
     }
     case "update_card": {
       const { id, ...fields } = args;
