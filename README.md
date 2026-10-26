@@ -4,6 +4,11 @@ AIとのチャットで学んだことを、1概念1枚のカードにして復�
 
 チャットは流れていき、読み返しても知識は定着しにくい。Hikidashi では、わからなかった用語や概念をカードとして1か所にしまい、忘れかけた頃に出題して**自分の言葉で思い出す**ことで定着させる。名前は、知識をしまう「引き出し」と、記憶から「引き出す」練習の両方から。
 
+<p align="center">
+  <img src="docs/screenshots/review-pc.png" alt="PC の復習画面" height="360">
+  <img src="docs/screenshots/review-sp.png" alt="スマホの復習画面" height="360">
+</p>
+
 ## できること
 
 | 機能 | 内容 |
