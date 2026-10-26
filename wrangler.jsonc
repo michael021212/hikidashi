@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hikidashi",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/__scheduled"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hikidashi",
+      "database_id": "3a352af3-53e7-49ee-bf50-48133eb5f5d4",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "vars": { "APP_URL": "https://hikidashi.fgem-apps.workers.dev" }
+}
