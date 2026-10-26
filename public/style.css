@@ -361,6 +361,18 @@ textarea.code,
   font-size: 13px;
 }
 
+.card-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.card-actions .active {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .grades {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

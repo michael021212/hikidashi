@@ -235,6 +235,49 @@ function reviewHeader(stage, card) {
   );
 }
 
+function askPrompt(card) {
+  const lines = [`Hikidashi の復習カード「${card.title}」について、まだわからないところがあります。`, ""];
+  if (card.question) lines.push(`問題：${card.question}`);
+  lines.push(`答え：${card.answer}`);
+  if (card.explanation) lines.push(`説明：\n${card.explanation}`);
+  if (card.pitfalls) lines.push(`つまずいた点：${card.pitfalls}`);
+  if (card.diagram) lines.push(`図（Mermaid）：\n${card.diagram}`);
+  lines.push("", "わかったら、このカードに追記するか私に確認してください。", "", "わからないところ：");
+  return lines.join("\n");
+}
+
+// 質問文をコピーしてから Claude を開く。URL で文章を渡せない環境でも、貼り付ければ続けられる
+function askButton(card) {
+  return h(
+    "button",
+    {
+      onclick: () => {
+        const prompt = askPrompt(card);
+        const copied = copyText(prompt);
+        const query = encodeURIComponent(prompt);
+        window.open(query.length < 6000 ? `https://claude.ai/new?q=${query}` : "https://claude.ai/new", "_blank");
+        return copied;
+      },
+    },
+    "質問する",
+  );
+}
+
+function flagButton(card) {
+  const button = h("button", {
+    class: card.flagged_at ? "active" : "",
+    "aria-pressed": String(Boolean(card.flagged_at)),
+    onclick: async () => {
+      const flagged = !card.flagged_at;
+      await api(`/api/cards/${card.id}/flag`, { method: "PUT", body: { flagged } });
+      card.flagged_at = flagged ? Date.now() : null;
+      button.classList.toggle("active", flagged);
+      button.setAttribute("aria-pressed", String(flagged));
+    },
+  }, "あとで調べる");
+  return button;
+}
+
 function showCard(stage) {
   const card = review.queue[review.index];
   if (!card) return showFinished(stage);
@@ -288,6 +331,7 @@ function showAnswer(stage, card, response) {
       card.related.length > 0 &&
         h("div", { class: "related" }, card.related.map((t) => h("span", { class: "tag" }, t))),
     ),
+    h("div", { class: "card-actions" }, askButton(card), flagButton(card)),
     h(
       "div",
       { class: "grades" },
@@ -329,6 +373,8 @@ async function showFinished(stage) {
 
 // ---- カード一覧 ----
 
+const FLAGGED = "__flagged";
+
 async function cardsView() {
   const stats = await api("/api/stats");
   const search = h("input", { type: "search", placeholder: "検索" });
@@ -336,13 +382,15 @@ async function cardsView() {
     "select",
     {},
     h("option", { value: "" }, "すべてのカテゴリ"),
+    stats.flagged > 0 && h("option", { value: FLAGGED }, `あとで調べる（${stats.flagged}）`),
     stats.categories.map((c) => h("option", { value: c.name }, `${c.name}（${c.total}）`)),
   );
   const list = h("ul", { class: "card-list" });
   const load = async () => {
     const params = new URLSearchParams();
     if (search.value) params.set("q", search.value);
-    if (category.value) params.set("category", category.value);
+    if (category.value === FLAGGED) params.set("flagged", "1");
+    else if (category.value) params.set("category", category.value);
     const cards = await api(`/api/cards?${params}`);
     const now = Date.now();
     swap(
@@ -355,7 +403,7 @@ async function cardsView() {
             "a",
             { href: `#/cards/${c.id}` },
             h("span", { class: "title" }, c.title),
-            h("span", { class: "meta" }, c.category),
+            h("span", { class: "meta" }, c.flagged_at ? `${c.category} · あとで調べる` : c.category),
             h("span", { class: `meta due${c.due <= now ? " now" : ""}` }, c.due <= now ? "復習待ち" : `${duration(c.due - now)}後`),
           ),
         ),

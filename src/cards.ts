@@ -44,6 +44,7 @@ export type CardRow = {
   lapses: number;
   state: number;
   last_review: number | null;
+  flagged_at: number | null;
 };
 
 export type CardInput = {
@@ -56,6 +57,7 @@ export type CardInput = {
   category?: unknown;
   related?: unknown;
   source?: unknown;
+  flagged?: unknown;
 };
 
 export async function getMeta<T>(db: D1Database, key: string): Promise<T | null> {
@@ -239,7 +241,24 @@ export async function updateCard(
       id,
     )
     .run();
+  if (input.flagged !== undefined) await setFlag(db, id, Boolean(input.flagged));
   return { ok: true, card: (await getCard(db, id))! };
+}
+
+/** 「あとで調べる」の印。印を付けた時刻を持ち、外すと null にする */
+export async function setFlag(db: D1Database, id: string, flagged: boolean): Promise<boolean> {
+  const { meta } = await db
+    .prepare("UPDATE cards SET flagged_at = ? WHERE id = ?")
+    .bind(flagged ? Date.now() : null, id)
+    .run();
+  return meta.changes > 0;
+}
+
+export async function listFlagged(db: D1Database): Promise<CardRow[]> {
+  const { results } = await db
+    .prepare("SELECT * FROM cards WHERE flagged_at IS NOT NULL ORDER BY flagged_at")
+    .all<CardRow>();
+  return results;
 }
 
 export async function getStats(db: D1Database) {
@@ -251,9 +270,11 @@ export async function getStats(db: D1Database) {
     .all<{ name: string; total: number; due: number }>();
   const due = results.reduce((s, r) => s + r.due, 0);
   const total = results.reduce((s, r) => s + r.total, 0);
+  const flagged = await db.prepare("SELECT COUNT(*) AS n FROM cards WHERE flagged_at IS NOT NULL").first<{ n: number }>();
   return {
     due,
     total,
+    flagged: flagged?.n ?? 0,
     categories: results,
     blocked: settings.blockEnabled && due >= settings.blockLimit,
     blockLimit: settings.blockLimit,

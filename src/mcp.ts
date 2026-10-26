@@ -1,6 +1,6 @@
 // Claude などのチャットから Hikidashi にカードを保存するための MCP サーバー。
 // Streamable HTTP のステートレス構成で、JSON-RPC の要求に JSON で応答する。
-import { createCards, getCard, getStats, listTitles, toJson, updateCard, type CardInput } from "./cards";
+import { createCards, getCard, getStats, listFlagged, listTitles, toJson, updateCard, type CardInput, type CardRow } from "./cards";
 import { CARD_FIELDS_GUIDE, CARD_SELECTION_GUIDE } from "./guide";
 
 type McpEnv = { DB: D1Database };
@@ -12,7 +12,8 @@ const SUPPORTED_VERSIONS = ["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-2
 const INSTRUCTIONS = `Hikidashi はユーザーが学んだことを1概念1枚のカードにして、間隔反復で復習するアプリ。
 ユーザーが「カードにして」「覚えておきたい」「Hikidashiに保存して」などと頼んだら、get_existing_cards で既存のカードを確認してから save_cards で保存する。
 同じ概念のカードがすでにあれば新しく作らず、get_card で中身を見て update_card で追記する。
-保存後は、作成・更新したカードのタイトルとカテゴリだけを短く伝える。`;
+保存後は、作成・更新したカードのタイトルとカテゴリだけを短く伝える。
+ユーザーが「あとで調べるカード」を見たいと言ったら get_flagged_cards で一覧を出す。深掘りしてわかったことは、ユーザーに確認してから update_card でそのカードに追記し、flagged を false にして印を外す。`;
 
 const cardProperties = {
   title: { type: "string", description: "用語や概念の名前" },
@@ -52,6 +53,13 @@ const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   },
   {
+    name: "get_flagged_cards",
+    title: "あとで調べるカードを見る",
+    description: "復習中にユーザーが「あとで調べる」の印を付けたカードを、印を付けた順に全項目で返す。",
+    inputSchema: { type: "object", properties: {} },
+    annotations: { readOnlyHint: true },
+  },
+  {
     name: "get_card",
     title: "カードの中身を見る",
     description: "タイトルを指定してカードの全項目を返す。既存カードに追記する前に使う。",
@@ -65,12 +73,22 @@ const TOOLS = [
       "既存カードの項目を書き換える。渡した項目だけが変わる。追記するときは get_card で取得した既存の文章を消さず、その後ろに新しく分かったことを足した全文を渡す。",
     inputSchema: {
       type: "object",
-      properties: { id: { type: "string", description: "get_card で得た id" }, ...cardProperties },
+      properties: {
+        id: { type: "string", description: "get_card で得た id" },
+        ...cardProperties,
+        flagged: { type: "boolean", description: "「あとで調べる」の印。深掘りが済んだら false にする" },
+      },
       required: ["id"],
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   },
 ];
+
+// 出題間隔などの内部情報は渡さない
+function cardFields(row: CardRow) {
+  const { id, title, question, answer, explanation, pitfalls, diagram, category, related, source } = toJson(row);
+  return { id, title, question, answer, explanation, pitfalls, diagram, category, related, source, flagged: row.flagged_at !== null };
+}
 
 function toolResult(data: unknown, isError = false) {
   return { content: [{ type: "text", text: JSON.stringify(data) }], isError };
@@ -91,14 +109,15 @@ async function callTool(env: McpEnv, name: string, args: Record<string, any>) {
       const result = await createCards(env.DB, cards);
       return toolResult(result, result.blocked);
     }
+    case "get_flagged_cards":
+      return toolResult({ cards: (await listFlagged(env.DB)).map(cardFields) });
     case "get_card": {
       const row = await env.DB.prepare("SELECT id FROM cards WHERE title = ?")
         .bind(String(args.title ?? ""))
         .first<{ id: string }>();
       const card = row && (await getCard(env.DB, row.id));
       if (!card) return toolResult({ error: "not_found" }, true);
-      const { id, title, question, answer, explanation, pitfalls, diagram, category, related, source } = toJson(card);
-      return toolResult({ id, title, question, answer, explanation, pitfalls, diagram, category, related, source });
+      return toolResult(cardFields(card));
     }
     case "update_card": {
       const { id, ...fields } = args;

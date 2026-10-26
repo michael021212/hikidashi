@@ -11,6 +11,7 @@ import {
   getStats,
   listTitles,
   sanitizeSettings,
+  setFlag,
   setMeta,
   str,
   toFsrs,
@@ -98,6 +99,7 @@ app.get("/api/import-prompt", async (c) => c.text(importPrompt(await listTitles(
 app.get("/api/cards", async (c) => {
   const q = c.req.query("q")?.trim();
   const category = c.req.query("category");
+  const flagged = c.req.query("flagged");
   const where: string[] = [];
   const binds: unknown[] = [];
   if (q) {
@@ -108,7 +110,8 @@ app.get("/api/cards", async (c) => {
     where.push("category = ?");
     binds.push(category);
   }
-  const sql = `SELECT id, title, category, due, state, reps, lapses FROM cards ${
+  if (flagged) where.push("flagged_at IS NOT NULL");
+  const sql = `SELECT id, title, category, due, state, reps, lapses, flagged_at FROM cards ${
     where.length ? `WHERE ${where.join(" AND ")}` : ""
   } ORDER BY updated_at DESC LIMIT 500`;
   const { results } = await c.env.DB.prepare(sql).bind(...binds).all();
@@ -132,6 +135,12 @@ app.put("/api/cards/:id", async (c) => {
   const result = await updateCard(c.env.DB, c.req.param("id"), await c.req.json<CardInput>());
   if (!result.ok) return c.json({ error: result.error }, result.error === "not_found" ? 404 : 409);
   return c.json(toJson(result.card));
+});
+
+app.put("/api/cards/:id/flag", async (c) => {
+  const { flagged } = await c.req.json<{ flagged?: boolean }>();
+  const ok = await setFlag(c.env.DB, c.req.param("id"), Boolean(flagged));
+  return ok ? c.json({ ok: true }) : c.json({ error: "not_found" }, 404);
 });
 
 app.delete("/api/cards/:id", async (c) => {
