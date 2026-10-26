@@ -127,9 +127,13 @@ button.wide {
   width: 100%;
 }
 
-button.icon {
+.icon {
   width: 40px;
   padding: 8px 0;
+}
+
+.svg {
+  display: flex;
 }
 
 .error {
@@ -235,7 +239,27 @@ nav a.active {
   pointer-events: none;
 }
 
+.review-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.review-header .icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-color: transparent;
+  background: none;
+  color: var(--muted);
+}
+
+.review-header .icon.danger:hover {
+  color: var(--danger);
+}
+
 .progress {
+  margin-right: auto;
   color: var(--muted);
   font-size: 14px;
   font-variant-numeric: tabular-nums;

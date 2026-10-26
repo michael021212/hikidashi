@@ -151,6 +151,41 @@ function chip(label, value, count) {
   );
 }
 
+const ICONS = {
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/>',
+  trash: '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>',
+};
+
+function icon(name) {
+  const span = h("span", { class: "svg" });
+  span.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
+  return span;
+}
+
+function reviewHeader(stage, card) {
+  return h(
+    "div",
+    { class: "review-header" },
+    h("span", { class: "progress" }, `${review.index + 1} / ${review.queue.length}`),
+    h("a", { class: "button icon", href: `#/cards/${card.id}/review`, "aria-label": "編集" }, icon("edit")),
+    h(
+      "button",
+      {
+        class: "icon danger",
+        "aria-label": "削除",
+        onclick: async () => {
+          if (!confirm(`「${card.title}」を削除しますか？`)) return;
+          await api(`/api/cards/${card.id}`, { method: "DELETE" });
+          review.queue.splice(review.index, 1);
+          showCard(stage);
+          drawChips(stage.previousElementSibling, await api("/api/stats"));
+        },
+      },
+      icon("trash"),
+    ),
+  );
+}
+
 function showCard(stage) {
   const card = review.queue[review.index];
   if (!card) return showFinished(stage);
@@ -159,7 +194,7 @@ function showCard(stage) {
   const reveal = () => showAnswer(stage, card, response.value);
   swap(
     stage,
-    h("div", { class: "progress" }, `${review.index + 1} / ${review.queue.length}`),
+    reviewHeader(stage, card),
     h(
       "article",
       { class: "card" },
@@ -188,7 +223,7 @@ function showAnswer(stage, card, response) {
 
   swap(
     stage,
-    h("div", { class: "progress" }, `${review.index + 1} / ${review.queue.length}`),
+    reviewHeader(stage, card),
     h(
       "article",
       { class: "card" },
@@ -300,7 +335,7 @@ async function cardsView() {
 
 // ---- カード編集 ----
 
-async function cardEditView(id) {
+async function cardEditView(id, back = "#/cards") {
   const [card, stats, titles] = await Promise.all([
     id ? api(`/api/cards/${id}`) : Promise.resolve(null),
     api("/api/stats"),
@@ -331,7 +366,7 @@ async function cardEditView(id) {
               return;
             }
           }
-          location.hash = "#/cards";
+          location.hash = back;
         } catch (err) {
           error.textContent =
             err.status === 423 ? `復習が${err.data.due}問たまっているため追加できません` : "保存できませんでした";
@@ -361,12 +396,12 @@ async function cardEditView(id) {
             onclick: async () => {
               if (!confirm(`「${card.title}」を削除しますか？`)) return;
               await api(`/api/cards/${id}`, { method: "DELETE" });
-              location.hash = "#/cards";
+              location.hash = back;
             },
           },
           "削除",
         ),
-      h("a", { class: "button", href: "#/cards" }, "キャンセル"),
+      h("a", { class: "button", href: back }, "キャンセル"),
       h("button", { class: "primary" }, "保存"),
     ),
   );
@@ -532,11 +567,12 @@ async function pushControl() {
 
 async function route() {
   onKey(null);
-  const [, page = "review", arg] = location.hash.split("/");
+  const [, page = "review", arg, from] = location.hash.split("/");
   tabs.hidden = false;
-  for (const a of tabs.querySelectorAll("a")) a.classList.toggle("active", a.dataset.tab === page);
+  const tab = from === "review" ? "review" : page;
+  for (const a of tabs.querySelectorAll("a")) a.classList.toggle("active", a.dataset.tab === tab);
   try {
-    if (page === "cards" && arg) await cardEditView(arg === "new" ? null : arg);
+    if (page === "cards" && arg) await cardEditView(arg === "new" ? null : arg, from === "review" ? "#/review" : "#/cards");
     else if (page === "cards") await cardsView();
     else if (page === "settings") await settingsView();
     else await reviewView();
