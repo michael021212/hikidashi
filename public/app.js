@@ -254,8 +254,10 @@ function askButton(card) {
       onclick: () => {
         const prompt = askPrompt(card);
         const copied = copyText(prompt);
+        // model は公式に案内されていない指定なので、効かなければ Claude 側の選択のまま開く
         const query = encodeURIComponent(prompt);
-        window.open(query.length < 6000 ? `https://claude.ai/new?q=${query}` : "https://claude.ai/new", "_blank");
+        const url = `https://claude.ai/new?model=claude-sonnet-5-5${query.length < 6000 ? `&q=${query}` : ""}`;
+        window.open(url, "_blank");
         return copied;
       },
     },
