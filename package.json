@@ -11,6 +11,7 @@
     "gen:icons": "node scripts/gen-icons.mjs"
   },
   "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^1.2.4",
     "hono": "^4.13.14",
     "ts-fsrs": "^5.4.2"
   },

@@ -395,7 +395,7 @@ nav a.active {
 
 .toolbar {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
   gap: 8px;
   margin-bottom: 12px;
 }
@@ -406,7 +406,7 @@ nav a.active {
 
 @media (min-width: 560px) {
   .toolbar {
-    grid-template-columns: 1fr 200px auto;
+    grid-template-columns: 1fr 200px auto auto;
   }
 
   .toolbar input {
@@ -484,6 +484,74 @@ nav a.active {
 
 .actions .danger {
   margin-right: auto;
+}
+
+/* ---- 取り込み ---- */
+
+.import {
+  display: grid;
+  gap: 12px;
+}
+
+.import-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.import textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+.import-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.import-list li > div {
+  display: grid;
+  min-width: 0;
+}
+
+.import-list li.skipped {
+  opacity: 0.5;
+}
+
+/* ---- 同意画面 ---- */
+
+.consent h1 {
+  font-size: 20px;
+  text-align: center;
+}
+
+.consent dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 16px;
+  width: 100%;
+  margin: 0;
+}
+
+.consent dt {
+  color: var(--muted);
+}
+
+.consent dd {
+  margin: 0;
+  word-break: break-all;
+}
+
+.consent .actions {
+  width: 100%;
+}
+
+.consent .actions button {
+  flex: 1;
 }
 
 /* ---- 設定 ---- */

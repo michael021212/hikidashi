@@ -1,0 +1,36 @@
+// カードの書き方。MCP のツール説明と、貼り付け取り込み用のプロンプトの両方で使う
+
+export const CARD_FIELDS_GUIDE = `- title：用語や概念の名前（例：「CORS」「減価償却」）
+- question：自分の言葉で説明させる問い。はい/いいえや一語で答えられる問いにしない（例：「CORSがなぜ必要なのか、ブラウザの立場から説明してください」）
+- answer：1〜2文の核心
+- explanation：仕組み・理由・具体例。3〜6文程度。会話で使われた例えや具体例があれば活かす
+- pitfalls：ユーザーが誤解していた点、追加で質問した点。会話から読み取れなければ空文字にする。推測で作らない
+- category：「Web」「会計」「統計」のような短い分野名。既存のカテゴリに合うならそれを使う
+- related：関係する既存カードのタイトルと、今回一緒に作るカードのタイトルの配列`;
+
+export const CARD_SELECTION_GUIDE = `会話の中でユーザーが質問した・知らなかった用語や概念を、1概念1枚のカードにする。ユーザーがすでに知っていた前提知識や雑談は入れない。1つの質問から複数の概念が出てきたら分ける。すべて日本語で書く。`;
+
+type Existing = { title: string; category: string }[];
+
+/** どの AI のチャットにも貼れる、カードを JSON で出力させる指示文 */
+export function importPrompt(existing: Existing): string {
+  const categories = [...new Set(existing.map((c) => c.category))];
+  const titles = existing.slice(0, 300).map((c) => c.title);
+  return `この会話で私が学んだことを、復習用のカードにしてください。
+
+${CARD_SELECTION_GUIDE}
+
+各カードの項目：
+${CARD_FIELDS_GUIDE}
+- source：このチャットのサービス名（例：「Claude」「ChatGPT」）
+
+既存のカテゴリ：${categories.length ? categories.join("、") : "なし"}
+既存のカードのタイトル：${titles.length ? titles.join("、") : "なし"}
+既存のカードと同じ概念は作らないでください。
+
+出力は次の形の JSON 配列を、1つのコードブロックだけで返してください。説明文は不要です。
+
+\`\`\`json
+[{"title": "", "question": "", "answer": "", "explanation": "", "pitfalls": "", "category": "", "related": [], "source": ""}]
+\`\`\``;
+}

@@ -13,31 +13,45 @@ AIとのチャットで学んだことを、1概念1枚のカードにして復�
 
 | 機能 | 内容 |
 | --- | --- |
-| カードの保存 | Claude Code で `/hikidashi` と打つと、会話から概念を拾ってカードにする。既存カードとの関連付けや、同じ概念への追記も自動 |
+| カードの保存 | 会話から概念を拾ってカードにする。既存カードとの関連付けや、同じ概念への追記も自動。保存の方法は3つ（下の表） |
 | 復習 | 問題に自分の言葉で答えてから模範解答を見て、「もう一度 / 難しい / できた / 簡単」で自己採点する。カテゴリで絞り込める |
 | 出題間隔の計算 | 採点結果から、次にいつ出題するかを [FSRS](https://github.com/open-spaced-repetition/ts-fsrs) で計算する |
 | 通知 | 設定した時刻に、復習待ちがあればスマホやPCに通知する。回答しないままだと再通知する |
 | 追加の制限 | 復習待ちがたまると、新しいカードを追加できなくなる。覚える量より復習を優先させるため |
 | 書き出し | 全カードを Markdown で書き出せる |
 
+### カードを保存する3つの方法
+
+| 方法 | 使う場面 | 操作 |
+| --- | --- | --- |
+| Claude のチャット（コネクタ） | PC・Android の Claude アプリ | 会話の中で「カードにして」と頼む |
+| Claude Code（`/hikidashi` スキル） | 開発中の会話 | `/hikidashi` と打つ |
+| 貼り付けで取り込み | 会社の Claude、ChatGPT など他の AI、Claude の契約をやめた後 | 取り込み画面でプロンプトをコピーしてチャットに貼り、返ってきた JSON を貼り付ける。Android では返答を Hikidashi に共有するだけでよい |
+
 ## 構成
 
 ```mermaid
 flowchart TB
+    chat["Claude のチャット<br/>（コネクタ）"]
     cc["Claude Code<br/>/hikidashi スキル"]
     web["ブラウザ / Android<br/>（ホーム画面に追加）"]
     push["プッシュサービス<br/>（Chrome なら FCM）"]
 
     subgraph cf["Cloudflare（無料枠）"]
         assets["静的ファイル<br/>画面・Service Worker"]
-        worker["Workers<br/>API（Hono）"]
+        oauth["OAuth<br/>接続の許可・トークン発行"]
+        worker["Workers<br/>REST API / MCP（Hono）"]
         cron["Cron<br/>15分ごと"]
         db[("D1<br/>カード・回答履歴・設定")]
+        kv[("KV<br/>OAuth のトークン")]
     end
 
-    cc -- "カードを保存" --> worker
+    chat -- "MCP でカードを保存" --> oauth
+    oauth --> worker
+    oauth <--> kv
+    cc -- "REST でカードを保存" --> worker
     web -- "画面を取得" --> assets
-    web -- "出題・採点・編集" --> worker
+    web -- "出題・採点・編集・取り込み" --> worker
     cron -- "通知するか判定" --> worker
     worker <--> db
     worker -- "通知を依頼" --> push
@@ -45,12 +59,13 @@ flowchart TB
 ```
 
 - **画面**はビルド不要の素の HTML / CSS / JavaScript（`public/`）。Workers の静的ファイル配信で返す
-- **API** は Hono で書いた Worker（`src/`）。`/api/*` だけが Worker を通る
+- **API** は Hono で書いた Worker（`src/`）。画面からは `/api/*` の REST API を、Claude のチャットからは `/mcp` の MCP サーバーを使う。どちらも同じカード保存処理（`src/cards.ts`）を通る
+- **認証**は2種類。画面と Claude Code はログイン用のトークン（`APP_TOKEN`）、Claude のチャットは OAuth で発行したアクセストークンを使う。OAuth は [workers-oauth-provider](https://github.com/cloudflare/workers-oauth-provider) に任せている
 - **データ**はすべて D1 に入る。Claude の契約とは独立しているので、契約をやめても残る
 
 ## 主な流れ
 
-### カードを保存する
+### Claude Code から保存する
 
 ```mermaid
 sequenceDiagram
@@ -74,6 +89,36 @@ sequenceDiagram
         cc-->>user: 保存したタイトルの一覧
     end
 ```
+
+### Claude のチャットとつなぐ
+
+コネクタを最初に登録するときだけ、Hikidashi の許可画面が開く。Hikidashi にログイン済みのブラウザでしか許可できないので、URL を知っているだけの他人は接続できない。
+
+```mermaid
+sequenceDiagram
+    actor user as 自分
+    participant claude as Claude
+    participant hk as Hikidashi
+
+    user->>claude: カスタムコネクタに /mcp の URL を登録
+    claude->>hk: /mcp（トークンなし）
+    hk-->>claude: 401 と、認可サーバーの場所
+    claude->>hk: クライアント登録
+    claude->>user: Hikidashi の許可画面を開く
+    user->>hk: ログインして「許可」
+    hk-->>claude: 認可コード
+    claude->>hk: コードをアクセストークンに交換
+    Note over claude,hk: 以降は会話で「カードにして」と頼むと<br/>Claude がツールを呼んで保存する
+```
+
+MCP サーバーが Claude に渡すツールは4つ。
+
+| ツール | 内容 |
+| --- | --- |
+| `get_existing_cards` | 既存カードのタイトルとカテゴリ、復習待ちの件数 |
+| `save_cards` | カードを保存する。カードの書き方の指示もツールの説明に入っている |
+| `get_card` | タイトルからカードの中身を取得する |
+| `update_card` | 既存カードに追記する |
 
 ### 復習する
 
@@ -113,7 +158,11 @@ sequenceDiagram
 ```
 hikidashi/
 ├── src/
-│   ├── index.ts        API・出題間隔の計算・通知の判定
+│   ├── index.ts        REST API・出題間隔の計算・通知の判定・OAuth の設定
+│   ├── cards.ts        カードと設定の読み書き（REST と MCP で共通）
+│   ├── mcp.ts          MCP サーバー（Claude のチャットから使うツール）
+│   ├── authorize.ts    コネクタ接続時の許可画面
+│   ├── guide.ts        カードの書き方（MCP のツール説明と取り込み用プロンプトで共通）
 │   └── push.ts         Web Push の送信（VAPID 署名）
 ├── public/             画面（ビルド不要）
 │   ├── index.html
@@ -151,6 +200,7 @@ curl "http://localhost:8787/__scheduled?cron=*/15+*+*+*+*"
 ```bash
 npx wrangler login
 npx wrangler d1 create hikidashi         # 出力された database_id を wrangler.jsonc に書く
+npx wrangler kv namespace create OAUTH_KV  # 出力された id を wrangler.jsonc の kv_namespaces に書く
 npm run db:migrate
 npm run gen:vapid                       # 出力された2つの値を次の secret に入れる
 npx wrangler secret put VAPID_PUBLIC_KEY
@@ -166,6 +216,22 @@ npm run deploy
 1. Android の Chrome でデプロイした URL を開き、`APP_TOKEN` でログインする
 2. メニューの「ホーム画面に追加」でアプリとして置く
 3. 設定画面で通知をオンにし、「テスト」で届くか確かめる
+
+### Claude のチャットとつなぐ
+
+1. Claude の設定画面の「コネクタ」から、カスタムコネクタを追加する
+2. URL に `https://hikidashi.<subdomain>.workers.dev/mcp` を入れて接続する
+3. 開いた Hikidashi の画面で、ログインして「許可」を押す
+
+PC で登録すれば Android の Claude アプリでも使える。会話の中で「カードにして」と頼むと保存される。最後に使ってから90日たつと接続が切れるので、その場合はもう一度接続する。
+
+### 貼り付けで取り込む
+
+1. Hikidashi の「カード」→「取り込む」で「プロンプトをコピー」を押す。既存のカテゴリとタイトルが入った指示文がコピーされる
+2. 学んだ会話の続きにそのまま貼って送ると、カードが JSON のコードブロックで返ってくる
+3. コードブロックをコピーして取り込み画面の「貼り付け」を押し、内容を確認して保存する
+
+Android では、ホーム画面に追加した Hikidashi が共有メニューに出る。AI の返答を Hikidashi に共有すると、取り込み画面が開いて中身が入った状態になる。
 
 ### /hikidashi スキルを使えるようにする
 
@@ -189,6 +255,7 @@ HIKIDASHI_TOKEN=<APP_TOKEN と同じ値>
 | --- | --- | --- |
 | `APP_TOKEN`（ログイン用） | Cloudflare の secret | `.dev.vars` |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY`（通知用） | Cloudflare の secret | `.dev.vars` |
+| Claude のコネクタ用のアクセストークン | KV（ハッシュ化して保存） | ー |
 | `HIKIDASHI_TOKEN`（スキル用） | ー | `~/.config/hikidashi/config` |
 
 ## 費用
@@ -199,6 +266,7 @@ Cloudflare の無料枠で収まる。上限を超えても無料プランでは
 | --- | --- | --- |
 | Workers | 1日10万リクエスト | 1日数十〜数百 |
 | D1 | 5GB、読み取り1日500万行 | カード数千枚で数MB |
+| KV | 読み取り1日10万回、書き込み1日1,000回 | コネクタの利用時だけ。1日数十回 |
 | Cron | 無料プランで利用可 | 1日96回 |
 | プッシュ通知 | 無料 | ー |
 
@@ -223,8 +291,13 @@ Cloudflare の無料枠で収まる。上限を超えても無料プランでは
 | GET | `/api/push/key` | 通知の購読に使う公開鍵 |
 | POST | `/api/push/subscribe` / `/api/push/unsubscribe` | 通知の購読・解除 |
 | POST | `/api/push/test` | テスト通知を送る |
+| GET | `/api/import-prompt` | 貼り付け取り込み用のプロンプト（既存のカテゴリとタイトル入り） |
+| POST | `/mcp` | MCP サーバー。OAuth のアクセストークンか `APP_TOKEN` が必要 |
+
+OAuth 用に `/authorize`（許可画面）、`/oauth/token`、`/oauth/register`、`/.well-known/oauth-authorization-server`、`/.well-known/oauth-protected-resource/mcp` もある。
 
 ## 使っているライブラリ
 
 - [Hono](https://hono.dev/)（MIT）：API のルーティング
 - [ts-fsrs](https://github.com/open-spaced-repetition/ts-fsrs)（MIT）：出題間隔の計算
+- [workers-oauth-provider](https://github.com/cloudflare/workers-oauth-provider)（MIT）：コネクタ接続の OAuth

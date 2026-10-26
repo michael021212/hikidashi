@@ -1,67 +1,35 @@
+import { OAuthProvider, type OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { createEmptyCard, fsrs, Rating, type Card as FsrsCard, type Grade } from "ts-fsrs";
+import { fsrs, Rating, type Grade } from "ts-fsrs";
+import {
+  countDue,
+  createCards,
+  getCard,
+  getMeta,
+  getSettings,
+  getStats,
+  listTitles,
+  sanitizeSettings,
+  setMeta,
+  str,
+  toFsrs,
+  toJson,
+  updateCard,
+  type CardInput,
+  type CardRow,
+} from "./cards";
+import { registerAuthorize } from "./authorize";
+import { importPrompt } from "./guide";
+import { handleMcp } from "./mcp";
 import { sendPush, type PushEnv } from "./push";
 
 type Env = PushEnv & {
   DB: D1Database;
   ASSETS: Fetcher;
   APP_TOKEN: string;
-};
-
-type Settings = {
-  timezone: string;
-  notifyTimes: string[];
-  renotifyMinutes: number;
-  renotifyMax: number;
-  sessionSize: number;
-  blockEnabled: boolean;
-  blockLimit: number;
-};
-
-const DEFAULT_SETTINGS: Settings = {
-  timezone: "Asia/Tokyo",
-  notifyTimes: ["08:00", "12:30", "21:00"],
-  renotifyMinutes: 60,
-  renotifyMax: 2,
-  sessionSize: 10,
-  blockEnabled: true,
-  blockLimit: 30,
-};
-
-type CardRow = {
-  id: string;
-  title: string;
-  question: string;
-  answer: string;
-  explanation: string;
-  pitfalls: string;
-  category: string;
-  related: string;
-  source: string;
-  created_at: number;
-  updated_at: number;
-  due: number;
-  stability: number;
-  difficulty: number;
-  elapsed_days: number;
-  scheduled_days: number;
-  learning_steps: number;
-  reps: number;
-  lapses: number;
-  state: number;
-  last_review: number | null;
-};
-
-type CardInput = {
-  title?: unknown;
-  question?: unknown;
-  answer?: unknown;
-  explanation?: unknown;
-  pitfalls?: unknown;
-  category?: unknown;
-  related?: unknown;
-  source?: unknown;
+  OAUTH_KV: KVNamespace;
+  OAUTH_PROVIDER: OAuthHelpers;
 };
 
 const COOKIE = "hikidashi_token";
@@ -99,6 +67,8 @@ app.use("/api/*", async (c, next) => {
   return c.json({ error: "unauthorized" }, 401);
 });
 
+registerAuthorize(app, (c) => tokenMatches(getCookie(c, COOKIE), c.env.APP_TOKEN));
+
 app.post("/api/logout", (c) => {
   deleteCookie(c, COOKIE, { path: "/" });
   return c.json({ ok: true });
@@ -106,45 +76,6 @@ app.post("/api/logout", (c) => {
 
 // ---- 設定・メタ情報 ----
 
-async function getMeta<T>(db: D1Database, key: string): Promise<T | null> {
-  const row = await db.prepare("SELECT value FROM meta WHERE key = ?").bind(key).first<{ value: string }>();
-  return row ? (JSON.parse(row.value) as T) : null;
-}
-
-async function setMeta(db: D1Database, key: string, value: unknown): Promise<void> {
-  await db
-    .prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
-    .bind(key, JSON.stringify(value))
-    .run();
-}
-
-async function getSettings(db: D1Database): Promise<Settings> {
-  return { ...DEFAULT_SETTINGS, ...(await getMeta<Partial<Settings>>(db, "settings")) };
-}
-
-function sanitizeSettings(input: Partial<Settings>, current: Settings): Settings {
-  const int = (v: unknown, fallback: number, min: number, max: number) =>
-    typeof v === "number" && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : fallback;
-  const times = Array.isArray(input.notifyTimes)
-    ? [...new Set(input.notifyTimes.filter((t): t is string => typeof t === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(t)))].sort()
-    : current.notifyTimes;
-  let timezone = current.timezone;
-  if (typeof input.timezone === "string") {
-    try {
-      new Intl.DateTimeFormat("en", { timeZone: input.timezone });
-      timezone = input.timezone;
-    } catch {}
-  }
-  return {
-    timezone,
-    notifyTimes: times,
-    renotifyMinutes: int(input.renotifyMinutes, current.renotifyMinutes, 15, 24 * 60),
-    renotifyMax: int(input.renotifyMax, current.renotifyMax, 0, 20),
-    sessionSize: int(input.sessionSize, current.sessionSize, 1, 100),
-    blockEnabled: typeof input.blockEnabled === "boolean" ? input.blockEnabled : current.blockEnabled,
-    blockLimit: int(input.blockLimit, current.blockLimit, 1, 1000),
-  };
-}
 
 app.get("/api/settings", async (c) => c.json(await getSettings(c.env.DB)));
 
@@ -157,65 +88,12 @@ app.put("/api/settings", async (c) => {
 
 // ---- カード ----
 
-function str(v: unknown, max = 20000): string {
-  return typeof v === "string" ? v.trim().slice(0, max) : "";
-}
 
-function relatedList(v: unknown): string[] {
-  const items = Array.isArray(v) ? v : typeof v === "string" ? v.split(/[,、]/) : [];
-  return [...new Set(items.map((x) => str(x, 200)).filter(Boolean))];
-}
+app.get("/api/stats", async (c) => c.json(await getStats(c.env.DB)));
 
-function toFsrs(row: CardRow): FsrsCard {
-  return {
-    due: new Date(row.due),
-    stability: row.stability,
-    difficulty: row.difficulty,
-    elapsed_days: row.elapsed_days,
-    scheduled_days: row.scheduled_days,
-    learning_steps: row.learning_steps,
-    reps: row.reps,
-    lapses: row.lapses,
-    state: row.state,
-    last_review: row.last_review ? new Date(row.last_review) : undefined,
-  };
-}
+app.get("/api/titles", async (c) => c.json(await listTitles(c.env.DB)));
 
-function toJson(row: CardRow) {
-  return { ...row, related: JSON.parse(row.related) as string[] };
-}
-
-async function countDue(db: D1Database, now: number, category?: string): Promise<number> {
-  const sql = category
-    ? "SELECT COUNT(*) AS n FROM cards WHERE due <= ? AND category = ?"
-    : "SELECT COUNT(*) AS n FROM cards WHERE due <= ?";
-  const stmt = category ? db.prepare(sql).bind(now, category) : db.prepare(sql).bind(now);
-  return (await stmt.first<{ n: number }>())?.n ?? 0;
-}
-
-app.get("/api/stats", async (c) => {
-  const now = Date.now();
-  const settings = await getSettings(c.env.DB);
-  const { results } = await c.env.DB.prepare(
-    "SELECT category AS name, COUNT(*) AS total, SUM(due <= ?) AS due FROM cards GROUP BY category ORDER BY category",
-  )
-    .bind(now)
-    .all<{ name: string; total: number; due: number }>();
-  const due = results.reduce((s, r) => s + r.due, 0);
-  const total = results.reduce((s, r) => s + r.total, 0);
-  return c.json({
-    due,
-    total,
-    categories: results,
-    blocked: settings.blockEnabled && due >= settings.blockLimit,
-    blockLimit: settings.blockLimit,
-  });
-});
-
-app.get("/api/titles", async (c) => {
-  const { results } = await c.env.DB.prepare("SELECT id, title, category FROM cards ORDER BY title").all();
-  return c.json(results);
-});
+app.get("/api/import-prompt", async (c) => c.text(importPrompt(await listTitles(c.env.DB))));
 
 app.get("/api/cards", async (c) => {
   const q = c.req.query("q")?.trim();
@@ -238,101 +116,22 @@ app.get("/api/cards", async (c) => {
 });
 
 app.get("/api/cards/:id", async (c) => {
-  const row = await c.env.DB.prepare("SELECT * FROM cards WHERE id = ?").bind(c.req.param("id")).first<CardRow>();
+  const row = await getCard(c.env.DB, c.req.param("id"));
   return row ? c.json(toJson(row)) : c.json({ error: "not_found" }, 404);
 });
 
 app.post("/api/cards", async (c) => {
   const body = await c.req.json<CardInput | CardInput[]>();
-  const inputs = Array.isArray(body) ? body : [body];
-  const now = Date.now();
-  const settings = await getSettings(c.env.DB);
-  const due = await countDue(c.env.DB, now);
-  if (settings.blockEnabled && due >= settings.blockLimit) {
-    return c.json({ error: "blocked", due, blockLimit: settings.blockLimit }, 423);
-  }
-
-  const created: { id: string; title: string }[] = [];
-  const conflicts: { id: string; title: string }[] = [];
-  const invalid: { index: number; error: string }[] = [];
-  for (const [index, input] of inputs.entries()) {
-    const title = str(input.title, 200);
-    const answer = str(input.answer);
-    if (!title || !answer) {
-      invalid.push({ index, error: "title_and_answer_required" });
-      continue;
-    }
-    const existing = await c.env.DB.prepare("SELECT id FROM cards WHERE title = ?").bind(title).first<{ id: string }>();
-    if (existing) {
-      conflicts.push({ id: existing.id, title });
-      continue;
-    }
-    const id = crypto.randomUUID();
-    const card = createEmptyCard(new Date(now));
-    await c.env.DB.prepare(
-      `INSERT INTO cards (id, title, question, answer, explanation, pitfalls, category, related, source,
-        created_at, updated_at, due, stability, difficulty, elapsed_days, scheduled_days, learning_steps, reps, lapses, state)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-      .bind(
-        id,
-        title,
-        str(input.question),
-        answer,
-        str(input.explanation),
-        str(input.pitfalls),
-        str(input.category, 100) || "未分類",
-        JSON.stringify(relatedList(input.related)),
-        str(input.source, 500),
-        now,
-        now,
-        card.due.getTime(),
-        card.stability,
-        card.difficulty,
-        card.elapsed_days,
-        card.scheduled_days,
-        card.learning_steps,
-        card.reps,
-        card.lapses,
-        card.state,
-      )
-      .run();
-    created.push({ id, title });
-  }
+  const result = await createCards(c.env.DB, Array.isArray(body) ? body : [body]);
+  if (result.blocked) return c.json({ error: "blocked", due: result.due, blockLimit: result.blockLimit }, 423);
+  const { created, conflicts, invalid } = result;
   return c.json({ created, conflicts, invalid }, created.length ? 201 : 200);
 });
 
 app.put("/api/cards/:id", async (c) => {
-  const id = c.req.param("id");
-  const row = await c.env.DB.prepare("SELECT * FROM cards WHERE id = ?").bind(id).first<CardRow>();
-  if (!row) return c.json({ error: "not_found" }, 404);
-  const input = await c.req.json<CardInput>();
-  const pick = (key: keyof CardInput, max?: number) => (input[key] === undefined ? undefined : str(input[key], max));
-  const title = pick("title", 200) || row.title;
-  const answer = pick("answer") || row.answer;
-  if (title !== row.title) {
-    const dup = await c.env.DB.prepare("SELECT id FROM cards WHERE title = ? AND id != ?").bind(title, id).first();
-    if (dup) return c.json({ error: "title_exists" }, 409);
-  }
-  await c.env.DB.prepare(
-    `UPDATE cards SET title = ?, question = ?, answer = ?, explanation = ?, pitfalls = ?, category = ?, related = ?,
-      source = ?, updated_at = ? WHERE id = ?`,
-  )
-    .bind(
-      title,
-      pick("question") ?? row.question,
-      answer,
-      pick("explanation") ?? row.explanation,
-      pick("pitfalls") ?? row.pitfalls,
-      pick("category", 100) || row.category,
-      input.related === undefined ? row.related : JSON.stringify(relatedList(input.related)),
-      pick("source", 500) ?? row.source,
-      Date.now(),
-      id,
-    )
-    .run();
-  const updated = await c.env.DB.prepare("SELECT * FROM cards WHERE id = ?").bind(id).first<CardRow>();
-  return c.json(toJson(updated!));
+  const result = await updateCard(c.env.DB, c.req.param("id"), await c.req.json<CardInput>());
+  if (!result.ok) return c.json({ error: result.error }, result.error === "not_found" ? 404 : 409);
+  return c.json(toJson(result.card));
 });
 
 app.delete("/api/cards/:id", async (c) => {
@@ -367,7 +166,7 @@ app.post("/api/cards/:id/review", async (c) => {
   const id = c.req.param("id");
   const { rating, response } = await c.req.json<{ rating: number; response?: string }>();
   if (!GRADES.includes(rating as Grade)) return c.json({ error: "invalid_rating" }, 400);
-  const row = await c.env.DB.prepare("SELECT * FROM cards WHERE id = ?").bind(id).first<CardRow>();
+  const row = await getCard(c.env.DB, id);
   if (!row) return c.json({ error: "not_found" }, 404);
 
   const now = Date.now();
@@ -513,8 +312,34 @@ export async function runNotify(env: Env, now: number): Promise<"slot" | "renoti
   return "renotify";
 }
 
+// /mcp はアクセストークンが必要。トークンの発行と、それ以外のリクエストの振り分けは OAuthProvider が行う。
+// resource に APP_URL を使うため、最初のリクエストで env を見てから作る
+let provider: OAuthProvider<Env> | undefined;
+
+function oauthProvider(env: Env): OAuthProvider<Env> {
+  provider ??= new OAuthProvider<Env>({
+    apiRoute: "/mcp",
+    apiHandler: { fetch: (request, env) => handleMcp(request, env) },
+    defaultHandler: { fetch: (request, env, ctx) => app.fetch(request, env, ctx) },
+    authorizeEndpoint: "/authorize",
+    tokenEndpoint: "/oauth/token",
+    clientRegistrationEndpoint: "/oauth/register",
+    clientIdMetadataDocumentEnabled: true,
+    scopesSupported: ["cards"],
+    requiredScopes: ["cards"],
+    resourceMetadata: { resource: `${env.APP_URL}/mcp`, authorization_servers: [env.APP_URL] },
+    // 使い続けている限り接続が切れないよう、最後に使ってから90日で失効させる
+    refreshTokenTTL: 90 * 24 * 3600,
+    refreshTokenIdleTTL: 90 * 24 * 3600,
+    // Claude Code などからは APP_TOKEN をそのまま使える
+    resolveExternalToken: async ({ token, env }) =>
+      (await tokenMatches(token, env.APP_TOKEN)) ? { props: {}, audience: `${env.APP_URL}/mcp` } : null,
+  });
+  return provider;
+}
+
 export default {
-  fetch: app.fetch,
+  fetch: (request, env, ctx) => oauthProvider(env).fetch(request, env, ctx),
   async scheduled(controller: ScheduledController, env: Env) {
     await runNotify(env, controller.scheduledTime);
   },

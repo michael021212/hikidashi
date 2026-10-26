@@ -325,6 +325,7 @@ async function cardsView() {
       { class: "toolbar" },
       search,
       category,
+      h("a", { class: `button${stats.blocked ? " disabled" : ""}`, href: stats.blocked ? undefined : "#/import" }, "取り込む"),
       h("a", { class: `button primary${stats.blocked ? " disabled" : ""}`, href: stats.blocked ? undefined : "#/cards/new" }, "追加"),
     ),
     stats.blocked && h("p", { class: "notice" }, `復習が${stats.due}問たまっているため追加できません`),
@@ -406,6 +407,135 @@ async function cardEditView(id, back = "#/cards") {
     ),
   );
   render(form);
+}
+
+// ---- 取り込み ----
+
+// AI の返答から JSON を取り出す。コードブロック、前後の文章、{ cards: [...] } の形にも対応する
+function parseCards(text) {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const source = fenced ? fenced[1] : text;
+  const start = source.search(/[[{]/);
+  const end = Math.max(source.lastIndexOf("]"), source.lastIndexOf("}"));
+  if (start < 0 || end < start) return null;
+  try {
+    const data = JSON.parse(source.slice(start, end + 1));
+    const list = Array.isArray(data) ? data : Array.isArray(data.cards) ? data.cards : [data];
+    return list.filter((c) => c && typeof c === "object");
+  } catch {
+    return null;
+  }
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // Clipboard API が使えない環境向けの代替
+    const area = h("textarea", { value: text, readOnly: true, style: "position:fixed;opacity:0" });
+    document.body.append(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    return ok;
+  }
+}
+
+async function importView() {
+  const [stats, titles] = await Promise.all([api("/api/stats"), api("/api/titles")]);
+  const existing = new Set(titles.map((t) => t.title));
+
+  const input = h("textarea", { rows: 6, placeholder: "JSON" });
+  input.value = sessionStorage.getItem("importText") ?? "";
+  sessionStorage.removeItem("importText");
+  const preview = h("ul", { class: "card-list import-list" });
+  const save = h("button", { class: "primary wide", disabled: true }, "保存");
+  const error = h("p", { class: "error", hidden: true });
+  let cards = [];
+
+  const update = () => {
+    const parsed = input.value.trim() ? parseCards(input.value) : [];
+    error.hidden = parsed !== null;
+    error.textContent = "読み取れませんでした";
+    cards = (parsed ?? []).filter((c) => c.title && c.answer && !existing.has(String(c.title).trim()));
+    swap(
+      preview,
+      (parsed ?? []).map((c) => {
+        const status = !c.title || !c.answer ? "不完全" : existing.has(String(c.title).trim()) ? "既存" : null;
+        return h(
+          "li",
+          { class: status ? "skipped" : "" },
+          h("div", {}, h("span", { class: "title" }, c.title || "（タイトルなし）"), h("span", { class: "meta" }, c.category || "未分類")),
+          status && h("span", { class: "meta due" }, status),
+        );
+      }),
+    );
+    save.disabled = cards.length === 0 || stats.blocked;
+    save.textContent = cards.length ? `${cards.length}枚を保存` : "保存";
+  };
+  input.addEventListener("input", update);
+
+  // クリックの直後にコピーしないとブラウザに拒否されることがあるので、先に取得しておく
+  const prompt = await fetch("/api/import-prompt").then((r) => r.text());
+  const copyPrompt = h(
+    "button",
+    {
+      onclick: async () => {
+        copyPrompt.textContent = (await copyText(prompt)) ? "コピーしました" : "コピーできませんでした";
+        setTimeout(() => (copyPrompt.textContent = "プロンプトをコピー"), 2000);
+      },
+    },
+    "プロンプトをコピー",
+  );
+  const paste = h(
+    "button",
+    {
+      onclick: async () => {
+        try {
+          input.value = await navigator.clipboard.readText();
+          update();
+        } catch {
+          input.focus();
+        }
+      },
+    },
+    "貼り付け",
+  );
+
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    try {
+      const res = await api("/api/cards", { method: "POST", body: cards });
+      render(
+        h(
+          "div",
+          { class: "finished" },
+          h("p", { class: "big" }, `${res.created.length}枚 保存`),
+          h("a", { class: "button primary", href: "#/review" }, "復習する"),
+        ),
+      );
+    } catch (err) {
+      error.textContent =
+        err.status === 423 ? `復習が${err.data.due}問たまっているため追加できません` : "保存できませんでした";
+      error.hidden = false;
+      save.disabled = false;
+    }
+  });
+
+  render(
+    h(
+      "section",
+      { class: "import" },
+      stats.blocked && h("p", { class: "notice" }, `復習が${stats.due}問たまっているため追加できません`),
+      h("div", { class: "import-actions" }, copyPrompt, paste),
+      input,
+      error,
+      preview,
+      save,
+    ),
+  );
+  update();
 }
 
 // ---- 設定 ----
@@ -569,11 +699,12 @@ async function route() {
   onKey(null);
   const [, page = "review", arg, from] = location.hash.split("/");
   tabs.hidden = false;
-  const tab = from === "review" ? "review" : page;
+  const tab = from === "review" ? "review" : page === "import" ? "cards" : page;
   for (const a of tabs.querySelectorAll("a")) a.classList.toggle("active", a.dataset.tab === tab);
   try {
     if (page === "cards" && arg) await cardEditView(arg === "new" ? null : arg, from === "review" ? "#/review" : "#/cards");
     else if (page === "cards") await cardsView();
+    else if (page === "import") await importView();
     else if (page === "settings") await settingsView();
     else await reviewView();
   } catch (err) {
@@ -581,6 +712,13 @@ async function route() {
     render(h("p", { class: "error" }, "読み込めませんでした"), h("button", { onclick: route }, "再読み込み"));
     console.error(err);
   }
+}
+
+// Android の共有メニューから /import?text=... で開かれたら、本文を取り込み画面に渡す
+if (location.pathname === "/import") {
+  const params = new URLSearchParams(location.search);
+  sessionStorage.setItem("importText", [params.get("text"), params.get("url")].filter(Boolean).join("\n"));
+  history.replaceState(null, "", "/#/import");
 }
 
 window.addEventListener("hashchange", route);
