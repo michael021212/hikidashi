@@ -347,8 +347,9 @@ nav a.active {
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   position: sticky;
-  bottom: calc(76px + env(safe-area-inset-bottom));
-  padding: 8px 0;
+  /* タブとの間にすき間ができないよう、下の余白がタブの裏に少し潜る位置に固定する */
+  bottom: calc(56px + env(safe-area-inset-bottom));
+  padding: 8px 0 16px;
   background: var(--bg);
 }
 
