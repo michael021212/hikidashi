@@ -203,6 +203,8 @@ function diagram(code) {
 const ICONS = {
   edit: '<path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/>',
   trash: '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>',
+  close: '<path d="M6 6l12 12"/><path d="M18 6L6 18"/>',
+  plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
 };
 
 function icon(name) {
@@ -748,7 +750,7 @@ async function settingsView() {
           e.target.value = saved[key];
         },
       }),
-      unit,
+      h("span", { class: "unit" }, unit),
     );
 
   const times = h("div", { class: "times" });
@@ -772,14 +774,14 @@ async function settingsView() {
           h(
             "button",
             {
-              class: "icon",
+              class: "icon ghost",
               "aria-label": "削除",
               onclick: async () => {
                 await save({ notifyTimes: settings.notifyTimes.filter((_, j) => j !== i) });
                 drawTimes();
               },
             },
-            "×",
+            icon("close"),
           ),
         ),
       ),
@@ -793,15 +795,20 @@ async function settingsView() {
             drawTimes();
           },
         },
-        "+",
+        icon("plus"),
       ),
     );
   drawTimes();
 
+  const blockLimit = number("blockLimit", 1, 1000, "問以上");
+  blockLimit.classList.toggle("off", !settings.blockEnabled);
   const block = h("input", {
     type: "checkbox",
     checked: settings.blockEnabled,
-    onchange: (e) => save({ blockEnabled: e.target.checked }),
+    onchange: (e) => {
+      blockLimit.classList.toggle("off", !e.target.checked);
+      save({ blockEnabled: e.target.checked });
+    },
   });
 
   render(
@@ -815,22 +822,19 @@ async function settingsView() {
       h("div", { class: "row" }, h("span", {}, "再通知の回数"), number("renotifyMax", 0, 20, "回")),
       h("h2", {}, "復習"),
       h("div", { class: "row" }, h("span", {}, "1回の問題数"), number("sessionSize", 1, 100, "問")),
-      h("div", { class: "row" }, h("label", { class: "check" }, block, "カードの追加を止める"), number("blockLimit", 1, 1000, "問以上")),
+      h("div", { class: "row" }, h("label", { class: "check" }, block, "カードの追加を止める"), blockLimit),
       h("h2", {}, "データ"),
+      h("div", { class: "row" }, h("a", { class: "button", href: "/api/export.md" }, "Markdownで書き出す")),
       h(
-        "div",
-        { class: "row" },
-        h("a", { class: "button", href: "/api/export.md" }, "Markdownで書き出す"),
-        h(
-          "button",
-          {
-            onclick: async () => {
-              await api("/api/logout", { method: "POST" });
-              route();
-            },
+        "button",
+        {
+          class: "logout",
+          onclick: async () => {
+            await api("/api/logout", { method: "POST" });
+            route();
           },
-          "ログアウト",
-        ),
+        },
+        "ログアウト",
       ),
     ),
   );
@@ -839,7 +843,7 @@ async function settingsView() {
 async function pushControl() {
   const box = h("span", { class: "push" });
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-    box.append("非対応");
+    box.append(h("span", { class: "status" }, "非対応"));
     return box;
   }
   const reg = await navigator.serviceWorker.ready;
@@ -862,21 +866,22 @@ async function pushControl() {
               "オフにする",
             ),
           ]
-        : h(
-            "button",
-            {
-              class: "primary",
-              disabled: Notification.permission === "denied",
-              onclick: async () => {
-                if ((await Notification.requestPermission()) !== "granted") return draw();
-                const { key } = await api("/api/push/key");
-                const created = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
-                await api("/api/push/subscribe", { method: "POST", body: { endpoint: created.endpoint } });
-                draw();
+        : Notification.permission === "denied"
+          ? h("span", { class: "status" }, "ブロック中")
+          : h(
+              "button",
+              {
+                class: "primary",
+                onclick: async () => {
+                  if ((await Notification.requestPermission()) !== "granted") return draw();
+                  const { key } = await api("/api/push/key");
+                  const created = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+                  await api("/api/push/subscribe", { method: "POST", body: { endpoint: created.endpoint } });
+                  draw();
+                },
               },
-            },
-            Notification.permission === "denied" ? "ブロック中" : "オンにする",
-          ),
+              "オンにする",
+            ),
     );
   };
   await draw();

@@ -622,7 +622,6 @@ textarea.code,
   gap: 12px;
   padding: 10px 0;
   border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
 }
 
 .row.top {
@@ -640,20 +639,51 @@ textarea.code,
   text-align: right;
 }
 
+/* 単位の長さが違っても入力欄の位置を揃える */
+.number .unit {
+  width: 3em;
+  font-size: 14px;
+}
+
+.number.off {
+  opacity: 0.4;
+}
+
 .times {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 8px;
-  justify-content: flex-end;
+  justify-items: end;
 }
 
 .time {
   display: inline-flex;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
 }
 
 .time input {
   width: auto;
+}
+
+/* 削除ボタンを単位と同じ幅にして、時刻と数値の入力欄の右端を揃える */
+.times > .icon,
+.time .icon {
+  width: 42px;
+}
+
+.icon.ghost {
+  border-color: transparent;
+  background: none;
+  color: var(--muted);
+}
+
+.status {
+  color: var(--muted);
+}
+
+.logout {
+  justify-self: start;
+  margin-top: 32px;
 }
 
 .push {
@@ -665,6 +695,7 @@ textarea.code,
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  white-space: nowrap;
 }
 
 .check input {
