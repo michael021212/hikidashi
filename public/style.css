@@ -490,9 +490,14 @@ textarea.code,
 
 /* ---- 編集 ---- */
 
-.editor {
+.editor,
+.fields {
   display: grid;
   gap: 14px;
+}
+
+.fields[hidden] {
+  display: none;
 }
 
 .editor label {

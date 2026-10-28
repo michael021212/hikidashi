@@ -304,6 +304,25 @@ function showCard(stage) {
   if (matchMedia("(pointer: fine)").matches) response.focus();
 }
 
+// 答えを開いたときのカード。編集画面のプレビューでも使う
+function answerCard(card, response) {
+  return h(
+    "article",
+    { class: "card" },
+    h("div", { class: "category" }, card.category),
+    h("h2", { class: "question" }, card.question || card.title),
+    response && h("blockquote", { class: "response" }, response),
+    h("hr"),
+    card.question && h("h3", { class: "title" }, card.title),
+    h("p", { class: "answer" }, card.answer),
+    card.explanation && h("p", { class: "explanation" }, card.explanation),
+    card.diagram && diagram(card.diagram),
+    card.pitfalls && h("div", { class: "pitfalls" }, h("h4", {}, "つまずいた点"), h("p", {}, card.pitfalls)),
+    card.related.length > 0 &&
+      h("div", { class: "related" }, card.related.map((t) => h("span", { class: "tag" }, t))),
+  );
+}
+
 function showAnswer(stage, card, response) {
   const grade = async (rating) => {
     onKey(null);
@@ -318,21 +337,7 @@ function showAnswer(stage, card, response) {
   swap(
     stage,
     reviewHeader(stage, card),
-    h(
-      "article",
-      { class: "card" },
-      h("div", { class: "category" }, card.category),
-      h("h2", { class: "question" }, card.question || card.title),
-      response && h("blockquote", { class: "response" }, response),
-      h("hr"),
-      card.question && h("h3", { class: "title" }, card.title),
-      h("p", { class: "answer" }, card.answer),
-      card.explanation && h("p", { class: "explanation" }, card.explanation),
-      card.diagram && diagram(card.diagram),
-      card.pitfalls && h("div", { class: "pitfalls" }, h("h4", {}, "つまずいた点"), h("p", {}, card.pitfalls)),
-      card.related.length > 0 &&
-        h("div", { class: "related" }, card.related.map((t) => h("span", { class: "tag" }, t))),
-    ),
+    answerCard(card, response),
     h("div", { class: "card-actions" }, askButton(card), flagButton(card)),
     h(
       "div",
@@ -448,6 +453,43 @@ async function cardEditView(id, back = "#/cards") {
     return h("label", {}, label, el);
   };
   const error = h("p", { class: "error", hidden: true });
+  const fields = h(
+    "div",
+    { class: "fields" },
+    field("title", "タイトル", h("input", { required: true, maxLength: 200 })),
+    field("question", "問題", h("textarea", { rows: 2 })),
+    field("answer", "答え", h("textarea", { rows: 3, required: true })),
+    field("explanation", "説明", h("textarea", { rows: 6 })),
+    field("pitfalls", "つまずいた点", h("textarea", { rows: 3 })),
+    field("diagram", "図", h("textarea", { rows: 4, class: "code" })),
+    field("category", "カテゴリ", h("input", { list: "categories" })),
+    field("related", "関連", h("input", { list: "titles" })),
+    h("datalist", { id: "categories" }, stats.categories.map((c) => h("option", { value: c.name }))),
+    h("datalist", { id: "titles" }, titles.filter((t) => t.id !== id).map((t) => h("option", { value: t.title }))),
+  );
+  const preview = h("div", { hidden: true });
+
+  // 入力中の内容を、復習で答えを開いたときの見た目で表示する
+  const modes = h("div", { class: "chips" });
+  const setMode = (previewing) => {
+    fields.hidden = previewing;
+    preview.hidden = !previewing;
+    if (previewing) {
+      const data = Object.fromEntries(new FormData(form));
+      const related = data.related.split(/[,、]/).map((t) => t.trim()).filter(Boolean);
+      swap(preview, answerCard({ ...data, related }));
+    }
+    swap(
+      modes,
+      [false, true].map((p) =>
+        h(
+          "button",
+          { type: "button", class: `chip${p === previewing ? " active" : ""}`, onclick: () => setMode(p) },
+          p ? "プレビュー" : "編集",
+        ),
+      ),
+    );
+  };
 
   const form = h(
     "form",
@@ -475,16 +517,8 @@ async function cardEditView(id, back = "#/cards") {
         }
       },
     },
-    field("title", "タイトル", h("input", { required: true, maxLength: 200 })),
-    field("question", "問題", h("textarea", { rows: 2 })),
-    field("answer", "答え", h("textarea", { rows: 3, required: true })),
-    field("explanation", "説明", h("textarea", { rows: 6 })),
-    field("pitfalls", "つまずいた点", h("textarea", { rows: 3 })),
-    field("diagram", "図", h("textarea", { rows: 4, class: "code" })),
-    field("category", "カテゴリ", h("input", { list: "categories" })),
-    field("related", "関連", h("input", { list: "titles" })),
-    h("datalist", { id: "categories" }, stats.categories.map((c) => h("option", { value: c.name }))),
-    h("datalist", { id: "titles" }, titles.filter((t) => t.id !== id).map((t) => h("option", { value: t.title }))),
+    fields,
+    preview,
     error,
     h(
       "div",
@@ -507,7 +541,18 @@ async function cardEditView(id, back = "#/cards") {
       h("button", { class: "primary" }, "保存"),
     ),
   );
-  render(form);
+  // プレビュー中に保存して入力漏れがあったら、編集に戻して該当欄を見せる
+  form.addEventListener(
+    "invalid",
+    () => {
+      if (!fields.hidden) return;
+      setMode(false);
+      setTimeout(() => form.reportValidity());
+    },
+    true,
+  );
+  setMode(false);
+  render(modes, form);
 }
 
 // ---- 取り込み ----
