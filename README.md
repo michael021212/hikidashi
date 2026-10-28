@@ -28,7 +28,7 @@ AIとのチャットで学んだことを、1概念1枚のカードにして復�
 | --- | --- | --- |
 | Claude のチャット（コネクタ） | PC・Android の Claude アプリ | 会話の中で「カードにして」と頼む |
 | Claude Code（`/hikidashi` スキル） | 開発中の会話 | `/hikidashi` と打つ |
-| 貼り付けで取り込み | 会社の Claude、ChatGPT など他の AI、Claude の契約をやめた後 | 取り込み画面でプロンプトをコピーしてチャットに貼り、返ってきた JSON を貼り付ける。Android では返答を Hikidashi に共有するだけでよい |
+| 貼り付けで取り込み | コネクタやスキルを入れていない環境、ChatGPT など他の AI、Claude の契約をやめた後 | 取り込み画面でプロンプトをコピーしてチャットに貼り、返ってきた JSON を貼り付ける。Android では返答を Hikidashi に共有するだけでよい |
 
 ## 構成
 
@@ -307,3 +307,7 @@ OAuth 用に `/authorize`（許可画面）、`/oauth/token`、`/oauth/register`
 - [Hono](https://hono.dev/)（MIT）：API のルーティング
 - [ts-fsrs](https://github.com/open-spaced-repetition/ts-fsrs)（MIT）：出題間隔の計算
 - [workers-oauth-provider](https://github.com/cloudflare/workers-oauth-provider)（MIT）：コネクタ接続の OAuth
+
+## ライセンス
+
+[MIT](LICENSE)
